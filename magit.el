@@ -1556,9 +1556,10 @@ FUNC should leave point at the end of the modified region"
 
 (defvar magit-custom-options '()
   "This variable is for internal use by the magit menu
-  functionality. Before executing a menu command, it is bound to
-  the list of arguments corresponding to the options setted by
-  the user on the menu.")
+  functionality (including the commands it invokes.) Before
+  executing the function associated to a menu command, it is
+  bound to the list of git arguments corresponding to the options
+  setted by the user on the menu.")
 
 (defvar magit-menu
   (list
@@ -1617,17 +1618,16 @@ DESCRIPTION: A short text description for displaying on the menu.
 
 FUNCTION: The function to be called when the command is
 invoked. The list of active options are on the global variable
-`magit-custom-options' on a format that is suitable to be passed
-on the command line to git. If the user entered the universal
-prefix argument before invoking the menu, it is passed to the
+`magit-custom-options'. If the user entered the universal prefix
+argument before invoking the menu, it is passed to the
 funcion. From the magit menu prompt the user can enter `?' to
 display the docstring of FUNCTION.
 
 `opt' type: Represents a git option to be passed to a
-command. The content of `magit-custom-options' is assembled with
-the values entered by the user for this options, on the same
-order that they are listed on the magit-menu list. The following
-elements of the item have this structure:
+command. The list `magit-custom-options' is assembled with the
+options set by the user, on the same order that they are listed
+on the magit-menu list. The following elements of the item have
+this structure:
 
 KEY: The key used as an accelerator to toggle or enter the
 option's value. If the option has an assigned value and KEY is
