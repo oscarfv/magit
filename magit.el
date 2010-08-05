@@ -1620,7 +1620,8 @@ invoked. The list of active options are on the global variable
 `magit-custom-options' on a format that is suitable to be passed
 on the command line to git. If the user entered the universal
 prefix argument before invoking the menu, it is passed to the
-funcion.
+funcion. From the magit menu prompt the user can enter `?' to
+display the docstring of FUNCTION.
 
 `opt' type: Represents a git option to be passed to a
 command. The content of `magit-custom-options' is assembled with
@@ -1645,37 +1646,52 @@ git on the command line after the option's NAME. Often
 has to be entered by the user.")
 
 (defun magit-menu-item-group (item)
+  "Returns the GROUP of the specified magit menu item."
   (car item))
 
 (defun magit-menu-item-type (item)
+  "Returns the TYPE of the specified magit menu item."
   (nth 1 item))
 
 (defun magit-menu-item-key (item)
+  "Returns the KEY of the specified magit menu item."
   (nth 2 item))
 
 (defun magit-menu-item-label (item)
+  "Returns the LABEL (NAME or DESCRIPTION) of the specified magit
+menu item."
   (nth 3 item))
 
 (defun magit-menu-item-cmd (item)
+  "Returns the CMD (function) of the specified magit menu item
+when it is of type `cmd'."
   (if (eq (magit-menu-item-type item) 'cmd)
       (nth 4 item)
     nil))
 
 (defun magit-menu-item-opt-getter (item)
+  "Returns the GETTER of the specified magit menu item when it is
+of type `opt'."
   (if (eq (magit-menu-item-type item) 'opt)
       (nth 4 item)
     nil))
 
 (defun magit-menu-item-opt-value (item)
+  "Returns the value of the specified magit menu item when it is
+of type `opt'."
   (if (eq (magit-menu-item-type item) 'opt)
       (nth 5 item)
     nil))
 
 (defun magit-menu-item-set-opt-value (item value)
+  "Sets the value of the specified magit menu item when it is of
+type `opt'."
   (when (eq (magit-menu-item-type item) 'opt)
     (setcar (nthcdr 5 item) value)))
 
 (defun magit-get-menu-options (group)
+  "Builds the list of menu items for the givem `group'. For items
+of type `opt' adds a cell for storing the option's value."
   (let ((menu-items '()))
     (dolist (item magit-menu)
       (when (eq (magit-menu-item-group item) group)
@@ -1689,6 +1705,9 @@ has to be entered by the user.")
     menu-items))
 
 (defun magit-menu-insert-item (text highlight-p)
+  "Inserts `text' on the current buffer on a columnar format,
+highlighting it with the face magit-menu-selected-option if
+highlight-p is not nil."
   (let* ((item-width 35)
 	 (max-items-perline 2)
 	 (max-columns (window-width))
@@ -1705,6 +1724,8 @@ has to be entered by the user.")
     (insert padding)))
 
 (defun magit-build-menu (group menu-items)
+  "Creates the textual representation for the magit menu on the
+current buffer."
   (erase-buffer)
   (let ((s ""))
     (insert (symbol-name group) " variants\n")
@@ -1725,6 +1746,11 @@ has to be entered by the user.")
     (fit-window-to-buffer))
 
 (defun magit-menu (group &optional prefix-arg)
+  "Displays the magit menu for `group' and waits for user
+input. If an option is selected, invokes its associated
+GETTER. When a command is selected, sets `magit-custom-options'
+and calls its associated FUNCTION passing prefix-arg on
+`current-prefix-arg'."
   (let ((magit-buf (current-buffer))
 	(menu-buf)
 	(menu-items (magit-get-menu-options group))
@@ -1793,6 +1819,7 @@ returns nil, unless `all-p' evals to true."
 	      (when (and (stringp value) (not join-valuep)) value)))))
 
 (defun magit-menu-make-option-list (menu-items)
+  "Returns the option list as to be passed to git."
   (let ((result '()))
     (dolist (item menu-items)
       (setq result (append result (magit-menu-make-arguments-for-option item))))
