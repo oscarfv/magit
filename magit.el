@@ -1594,7 +1594,55 @@ FUNC should leave point at the end of the modified region"
    '(branch opt ?C "--contains" magit-read-rev)
    '(branch opt ?M "--merged" magit-read-rev)
    '(branch opt ?N "--no-merged" magit-read-rev)
-   ))
+   )
+  "List of items for building the magit menu.
+
+Users can add items to this list to expand the menu with their
+own functionality.
+
+Each item is a list with this structure:
+
+GROUP: Symbol for the group of items. Example: log
+
+TYPE: Symbol for distinguishing menu item types. Each type has
+its own structure describe below. The rest of the menu item
+elements depends on the TYPE.
+
+`cmd' type: A command. It represents an action to be
+executed. The following elements have this structure:
+
+KEY: The key used as the accelerator for invoking the command.
+
+DESCRIPTION: A short text description for displaying on the menu.
+
+FUNCTION: The function to be called when the command is
+invoked. The list of active options are on the global variable
+`magit-custom-options' on a format that is suitable to be passed
+on the command line to git. If the user entered the universal
+prefix argument before invoking the menu, it is passed to the
+funcion.
+
+`opt' type: Represents a git option to be passed to a
+command. The content of `magit-custom-options' is assembled with
+the values entered by the user for this options, on the same
+order that they are listed on the magit-menu list. The following
+elements of the item have this structure:
+
+KEY: The key used as an accelerator to toggle or enter the
+option's value. If the option has an assigned value and KEY is
+pressed, it value becomes nil (not setted.) Otherwise the GETTER
+function is invoked.
+
+NAME: The option's text as passed to git on the command line.
+
+GETTER: A function that is called when the user presses the KEY
+and that returns the value for the option. The GETTER receives
+one argument which is the NAME of the option. For on/off options
+the GETTER can be `magit-true', which simply returs t. For the
+rest of options, the GETTER must return a string to be passed to
+git on the command line after the option's NAME. Often
+`read-from-minibuffer' is suitable as the GETTER when the value
+has to be entered by the user.")
 
 (defun magit-menu-item-group (item)
   (car item))
