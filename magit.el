@@ -517,13 +517,20 @@ Many Magit faces inherit from this one by default."
 	(substring head 11)
       nil)))
 
+(defun magit-get-remote (branch)
+  "Return the name of the remote for BRANCH.
+If branch is nil or it has no remote, but a remote named
+\"origin\" exists, return that. Otherwise, return nil."
+  (let ((remote (or (and branch (magit-get "branch" branch "remote"))
+                    (and (magit-get "remote" "origin" "url") "origin"))))
+    (if (string= remote "") nil remote)))
+
 (defun magit-get-current-remote ()
   "Return the name of the remote for the current branch.
 If there is no current branch, or no remote for that branch,
-return nil."
-  (let* ((branch (magit-get-current-branch))
-         (remote (and branch (magit-get "branch" branch "remote"))))
-    (if (string= remote "") nil remote)))
+but a remote named \"origin\" is configured, return that.
+Otherwise, return nil."
+  (magit-get-remote (magit-get-current-branch)))
 
 (defun magit-ref-exists-p (ref)
   (= (magit-git-exit-code "show-ref" "--verify" ref) 0))
@@ -623,6 +630,16 @@ out revs involving HEAD."
       nil)))
 
 ;;; Revisions and ranges
+
+(defvar magit-current-range nil
+  "The range described by the current buffer.
+This is only non-nil in diff and log buffers.
+
+This has three possible (non-nil) forms.  If it's a string REF or
+a singleton list (REF), then the range is from REF to the current
+working directory state (or HEAD in a log buffer).  If it's a
+pair (START . END), then the range is START..END.")
+(make-variable-buffer-local 'magit-current-range)
 
 (defun magit-list-interesting-refs ()
   (let ((refs ()))
@@ -1956,6 +1973,7 @@ returns nil, unless `all-p' evals to true."
     (define-key map (kbd "e") 'magit-log-show-more-entries)
     (define-key map (kbd "l") 'magit-log-menu)
     (define-key map (kbd "t") 'magit-tag)
+    (define-key map (kbd "T") 'magit-annotated-tag)
     map))
 
 (defvar magit-reflog-mode-map
@@ -2719,9 +2737,12 @@ insert a line to tell how to insert more of them"
   (magit-create-buffer-sections
     (magit-git-section nil nil
 		       'magit-wash-commit
-		       "log" "--max-count=1"
+		       "log"
+		       "--decorate=full"
+		       "--max-count=1"
 		       "--pretty=medium"
-		       "--cc" "-p" commit)))
+		       "--cc"
+		       "-p" commit)))
 
 (define-minor-mode magit-commit-mode
     "Minor mode to view git commit"
@@ -3076,6 +3097,7 @@ If the branch is the current one, offers to switch to `master' first.
   (magit-section-case (item info)
     ((wazzup commit)
      (magit-section-info (magit-section-parent item)))
+    ((commit) (substring info 0 8))
     ((wazzup) info)))
 
 (defun magit-manual-merge (revision)
@@ -3356,7 +3378,7 @@ typing and automatically refreshes the status buffer."
   (interactive)
   (let* ((branch (or (magit-get-current-branch)
 		     (error "Don't push a detached head.  That's gross")))
-	 (branch-remote (magit-get "branch" branch "remote"))
+	 (branch-remote (magit-get-remote branch))
 	 (push-remote (if (or current-prefix-arg
 			      (not branch-remote))
 			  (magit-read-remote (format "Push %s to" branch)
@@ -3388,6 +3410,7 @@ typing and automatically refreshes the status buffer."
     (define-key map (kbd "C-c C-c") 'magit-log-edit-commit)
     (define-key map (kbd "C-c C-a") 'magit-log-edit-toggle-amending)
     (define-key map (kbd "C-c C-s") 'magit-log-edit-toggle-signoff)
+    (define-key map (kbd "C-c C-e") 'magit-log-edit-toggle-allow-empty)
     (define-key map (kbd "M-p") 'log-edit-previous-comment)
     (define-key map (kbd "M-n") 'log-edit-next-comment)
     (define-key map (kbd "C-c C-k") 'magit-log-edit-cancel-log-message)
@@ -3446,7 +3469,7 @@ Prefix arg means justify as well."
   (let ((buf (get-buffer-create magit-log-edit-buffer-name)))
     (with-current-buffer buf
       (goto-char (point-min))
-      (if (search-forward-regexp (format "^\\([A-Za-z0-9-_]+:.*\n\\)+%s"
+      (if (search-forward-regexp (format "^\\([A-Za-z0-9-_]+:.*\n\\)*%s"
 					 (regexp-quote magit-log-header-end))
 				 nil t)
 	  (delete-region (match-beginning 0) (match-end 0)))
@@ -3472,6 +3495,24 @@ Prefix arg means justify as well."
 
 (defun magit-log-edit-get-field (name)
   (cdr (assq name (magit-log-edit-get-fields))))
+
+(defun magit-log-edit-toggle-field (name default)
+  "Toggle the log-edit field named NAME.
+If it's currently unset, set it to DEFAULT (t or nil).
+
+Return nil if the field is toggled off, and non-nil if it's
+toggled on.  When it's toggled on for the first time, return
+'first."
+  (let* ((fields (magit-log-edit-get-fields))
+	 (cell (assq name fields)) yesp)
+    (if cell
+        (progn
+          (setq yesp (equal (cdr cell) "yes"))
+          (rplacd cell (if yesp "no" "yes")))
+      (setq fields (acons name (if default "yes" "no") fields))
+      (setq yesp (if default 'first)))
+    (magit-log-edit-set-fields fields)
+    yesp))
 
 (defun magit-log-edit-setup-author-env (author)
   (cond (author
@@ -3501,12 +3542,14 @@ Prefix arg means justify as well."
   (interactive)
   (let* ((fields (magit-log-edit-get-fields))
 	 (amend (equal (cdr (assq 'amend fields)) "yes"))
+	 (allow-empty (equal (cdr (assq 'allow-empty fields)) "yes"))
 	 (commit-all (equal (cdr (assq 'commit-all fields)) "yes"))
 	 (sign-off-field (assq 'sign-off fields))
 	 (sign-off (if sign-off-field
 		       (equal (cdr sign-off-field) "yes")
 		     magit-commit-signoff))
-	 (tag (cdr (assq 'tag fields)))
+	 (tag-rev (cdr (assq 'tag-rev fields)))
+	 (tag-name (cdr (assq 'tag-name fields)))
 	 (author (cdr (assq 'author fields))))
     (magit-log-edit-push-to-comment-ring (buffer-string))
     (magit-log-edit-setup-author-env author)
@@ -3516,15 +3559,16 @@ Prefix arg means justify as well."
 	(insert "(Empty description)\n"))
     (let ((commit-buf (current-buffer)))
       (with-current-buffer (magit-find-buffer 'status default-directory)
-	(cond (tag
-	       (magit-run-git-with-input commit-buf "tag" tag "-a" "-F" "-"))
+	(cond (tag-name
+	       (magit-run-git-with-input commit-buf "tag" tag-name "-a" "-F" "-" tag-rev))
 	      (t
 	       (apply #'magit-run-async-with-input commit-buf
 		      magit-git-executable
 		      (append magit-git-standard-options
 			      (list "commit" "-F" "-")
-			      (if commit-all '("--all") '())
+			      (if (and commit-all (not allow-empty)) '("--all") '())
 			      (if amend '("--amend") '())
+			      (if allow-empty '("--allow-empty"))
 			      (if sign-off '("--signoff") '())))))))
     (erase-buffer)
     (bury-buffer)
@@ -3551,26 +3595,21 @@ Prefix arg means justify as well."
   "Toggle whether this will be an amendment to the previous commit.
 \(i.e., whether eventual commit does 'git commit --amend')"
   (interactive)
-  (let* ((fields (magit-log-edit-get-fields))
-	 (cell (assq 'amend fields)))
-    (if cell
-	(rplacd cell (if (equal (cdr cell) "yes") "no" "yes"))
-      (setq fields (acons 'amend "yes" fields))
-      (magit-log-edit-append
-       (magit-format-commit "HEAD" "%s%n%n%b")))
-    (magit-log-edit-set-fields fields)))
+  (when (eq (magit-log-edit-toggle-field 'amend t) 'first)
+    (magit-log-edit-append
+     (magit-format-commit "HEAD" "%s%n%n%b"))))
 
 (defun magit-log-edit-toggle-signoff ()
   "Toggle whether this commit will include a signoff.
 \(i.e., whether eventual commit does 'git commit --signoff')"
   (interactive)
-  (let* ((fields (magit-log-edit-get-fields))
-	 (cell (assq 'sign-off fields)))
-    (if cell
-	(rplacd cell (if (equal (cdr cell) "yes") "no" "yes"))
-      (setq fields (acons 'sign-off (if magit-commit-signoff "no" "yes")
-			  fields)))
-    (magit-log-edit-set-fields fields)))
+  (magit-log-edit-toggle-field 'sign-off (not magit-commit-signoff)))
+
+(defun magit-log-edit-toggle-allow-empty ()
+  "Toggle whether this commit is allowed to be empty.
+This means that the eventual commit does 'git commit --allow-empty'."
+  (interactive)
+  (magit-log-edit-toggle-field 'allow-empty t))
 
 (defun magit-pop-to-log-edit (operation)
   (let ((dir default-directory)
@@ -3590,7 +3629,6 @@ Prefix arg means justify as well."
 	 (if (y-or-n-p "Rebase in progress.  Continue it? ")
 	     (magit-run-git "rebase" "--continue")))
 	(t
-	 (magit-log-edit-set-field 'tag nil)
 	 (when (and magit-commit-all-when-nothing-staged
 		    (not (magit-anything-staged-p)))
 	   (cond ((eq magit-commit-all-when-nothing-staged 'ask-stage)
@@ -3669,11 +3707,15 @@ Prefix arg means justify as well."
     (magit-read-rev "Place tag on: " (or (magit-default-rev) "HEAD"))))
   (magit-run-git "tag" name rev))
 
-(magit-define-command annotated-tag (name)
+(magit-define-command annotated-tag (name rev)
   "Start composing an annotated tag with the given NAME.
 Tag will point to the current 'HEAD'."
-  (interactive "sNew annotated tag name: ")
-  (magit-log-edit-set-field 'tag name)
+  (interactive
+   (list
+    (read-string "Tag name: ")
+    (magit-read-rev "Place tag on: " (or (magit-default-rev) "HEAD"))))
+  (magit-log-edit-set-field 'tag-name name)
+  (magit-log-edit-set-field 'tag-rev rev)
   (magit-pop-to-log-edit "tag"))
 
 ;;; Stashing
@@ -3712,6 +3754,7 @@ With prefix argument, changes in staging area are kept.
   (apply 'magit-run-git `("stash"
 			  "save"
 			  ,@(when current-prefix-arg '("--keep-index"))
+			  "--"
 			  ,description)))
 
 (magit-define-command stash-snapshot ()
@@ -3784,7 +3827,7 @@ With prefix argument, changes in staging area are kept.
 				,@(if (not docommit) (list "--no-commit"))
 				,commit)
 			      nil noerase)))
-    (when (or (not docommit) success)
+    (when (and (not docommit) success)
       (cond (revert
 	     (magit-log-edit-append
 	      (magit-format-commit commit "Reverting \"%s\"")))
@@ -3879,6 +3922,7 @@ With a non numeric prefix ARG, show all entries"
 (defun magit-refresh-log-buffer (range style args)
   (magit-configure-have-graph)
   (magit-configure-have-decorate)
+  (setq magit-current-range range)
   (magit-create-log-buffer-sections
     (apply #'magit-git-section nil
 	   (magit-rev-range-describe range "Commits")
@@ -3963,7 +4007,13 @@ level commits."
 
 ;;; Reflog
 
+(defvar magit-reflog-head nil
+  "The HEAD of the reflog in the current buffer.
+This is only non-nil in reflog buffers.")
+(make-variable-buffer-local 'magit-reflog-head)
+
 (defun magit-refresh-reflog-buffer (head args)
+  (setq magit-reflog-head head)
   (magit-create-log-buffer-sections
     (magit-git-section 'reflog
 		       (format "Local history of head %s" head)
@@ -3997,6 +4047,7 @@ level commits."
 ;;; Diffing
 
 (defun magit-refresh-diff-buffer (range args)
+  (setq magit-current-range range)
   (magit-create-buffer-sections
     (magit-git-section 'diffbuf
 		       (magit-rev-range-describe range "Changes")
@@ -4032,6 +4083,16 @@ level commits."
 
 ;;; Wazzup
 
+(defvar magit-wazzup-head nil
+  "The integration head for the current wazzup buffer.
+This is only non-nil in wazzup buffers.")
+(make-variable-buffer-local 'magit-wazzup-head)
+
+(defvar magit-wazzup-all-p nil
+  "Non-nil if the current wazzup buffer displays excluded branches.
+This is only meaningful in wazzup buffers.")
+(make-variable-buffer-local 'magit-wazzup-all-p)
+
 (defun magit-wazzup-toggle-ignore (branch edit)
   (let ((ignore-file ".git/info/wazzup-exclude"))
     (if edit
@@ -4047,6 +4108,8 @@ level commits."
       (magit-need-refresh))))
 
 (defun magit-refresh-wazzup-buffer (head all)
+  (setq magit-wazzup-head head)
+  (setq magit-wazzup-all-p all)
   (let ((branch-desc (or head "(detached) HEAD")))
     (unless head (setq head "HEAD"))
     (magit-create-buffer-sections
@@ -4116,7 +4179,8 @@ level commits."
     (if edit
 	(setq file (read-string "File to ignore: " file)))
     (with-temp-buffer
-      (insert-file-contents ignore-file)
+      (when (file-exists-p ignore-file)
+        (insert-file-contents ignore-file))
       (goto-char (point-max))
       (unless (bolp)
 	(insert "\n"))
